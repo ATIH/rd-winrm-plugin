@@ -1,6 +1,5 @@
 #!/usr/bin/ruby
 require 'winrm-fs'
-auth = ENV['RD_CONFIG_AUTHTYPE']
 user = ENV['RD_CONFIG_USER'].dup # for some reason these strings is frozen, so we duplicate it
 pass = ENV['RD_CONFIG_PASS'].dup
 host = ENV['RD_NODE_HOSTNAME']
@@ -11,14 +10,11 @@ override = ENV['RD_CONFIG_ALLOWOVERRIDE']
 host = ENV['RD_OPTION_WINRMHOST'] if ENV['RD_OPTION_WINRMHOST'] && (override == 'host' || override == 'all')
 user = ENV['RD_OPTION_WINRMUSER'].dup if ENV['RD_OPTION_WINRMUSER'] && (override == 'user' || override == 'all')
 pass = ENV['RD_OPTION_WINRMPASS'].dup if ENV['RD_OPTION_WINRMPASS'] && (override == 'user' || override == 'all')
+auth = ENV['RD_CONFIG_AUTHTYPE']
+proto = (auth == 'ssl') ? "https" : "http"
 
 file = ARGV[1]
 dest = ARGV[2]
-if auth == 'ssl'
-  endpoint = "https://#{host}:#{port}/wsman"
-else
-  endpoint = "http://#{host}:#{port}/wsman"
-end
 
 # Wrapper to fix: "not setting executing flags by rundeck for 2nd file in plugin"
 # # https://github.com/rundeck/rundeck/issues/1421
@@ -42,18 +38,35 @@ if %r{/tmp/.*\.sh}.match(dest)
   end
 end
 
+conn_opts = {
+  endpoint: "#{proto}://#{host}:#{port}/wsman",
+  user: user,
+  password: pass,
+  disable_sspi: true
+}
+
 case auth
 when 'kerberos'
-  winrm = WinRM::WinRMWebService.new(endpoint, :kerberos, realm: realm)
+  transport = :ssl
 when 'plaintext'
-  winrm = WinRM::WinRMWebService.new(endpoint, :plaintext, user: user, pass: pass, disable_sspi: true)
+  transport = :plaintext
 when 'ssl'
-  winrm = WinRM::WinRMWebService.new(endpoint, :ssl, user: user, pass: pass, disable_sspi: true)
+  transport = :ssl
 else
   fail "Invalid authtype '#{auth}' specified, expected: kerberos, plaintext, ssl."
 end
 
-winrm.set_timeout(ENV['RD_CONFIG_WINRMTIMEOUT'].to_i) if ENV['RD_CONFIG_WINRMTIMEOUT']
+conn_opts = conn_opts.merge( { transport: transport } )
+conn_opts = conn_opts.merge( { ca_trust_path: ENV['RD_CONFIG_CA_TRUST_PATH']}) if ENV['RD_CONFIG_CA_TRUST_PATH'] && transport == :ssl
+
+conn_opts = conn_opts.merge( { operation_timeout: ENV['RD_CONFIG_WINRMTIMEOUT'].to_i } ) if ENV['RD_CONFIG_WINRMTIMEOUT']
+
+if ENV['RD_JOB_LOGLEVEL'] == 'DEBUG'
+  puts "Connection options :"
+  puts conn_opts.inspect
+end
+
+winrm = WinRM::Connection.new(conn_opts)
 
 file_manager = WinRM::FS::FileManager.new(winrm)
 
@@ -65,3 +78,5 @@ file_manager.upload(file, dest)
 
 ## upload the entire directory contents of foo to c:\program files\bar
 # file_manager.upload('/Users/sneal/foo', '$env:ProgramFiles/bar')
+
+#file_manager.upload('/home/brice/index.htm', 'D:/')

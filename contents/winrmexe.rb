@@ -1,6 +1,5 @@
 #!/usr/bin/ruby
 require 'winrm'
-auth = ENV['RD_CONFIG_AUTHTYPE']
 user = ENV['RD_CONFIG_USER'].dup # for some reason these strings is frozen, so we duplicate it
 pass = ENV['RD_CONFIG_PASS'].dup
 host = ENV['RD_NODE_HOSTNAME']
@@ -12,12 +11,9 @@ override = ENV['RD_CONFIG_ALLOWOVERRIDE']
 host = ENV['RD_OPTION_WINRMHOST'] if ENV['RD_OPTION_WINRMHOST'] && (override == 'host' || override == 'all')
 user = ENV['RD_OPTION_WINRMUSER'].dup if ENV['RD_OPTION_WINRMUSER'] && (override == 'user' || override == 'all')
 pass = ENV['RD_OPTION_WINRMPASS'].dup if ENV['RD_OPTION_WINRMPASS'] && (override == 'user' || override == 'all')
+auth = ENV['RD_CONFIG_AUTHTYPE']
+proto = (auth == 'ssl') ? "https" : "http"
 
-if auth == 'ssl'
-  endpoint = "https://#{host}:#{port}/wsman"
-else
-  endpoint = "http://#{host}:#{port}/wsman"
-end
 ooutput = ''
 eoutput = ''
 
@@ -61,7 +57,7 @@ end
 if ENV['RD_JOB_LOGLEVEL'] == 'DEBUG'
   puts 'variables:'
   puts "realm => #{realm}"
-  puts "endpoint => #{endpoint}"
+  puts "endpoint => #{proto}://#{host}:#{port}/wsman"
   puts "user => #{user}"
   puts 'pass => ********'
   # puts "pass => #{pass}" # uncomment it for full auth debugging
@@ -90,53 +86,47 @@ def stderr_text(stderr)
   end
 end
 
+conn_opts = {
+  endpoint: "#{proto}://#{host}:#{port}/wsman",
+  user: user,
+  password: pass,
+  disable_sspi: true
+}
+
 case auth
 when 'kerberos'
-  winrm = WinRM::WinRMWebService.new(endpoint, :kerberos, realm: realm)
+  transport = :ssl
 when 'plaintext'
-  winrm = WinRM::WinRMWebService.new(endpoint, :plaintext, user: user, pass: pass, disable_sspi: true)
+  transport = :plaintext
 when 'ssl'
-  winrm = WinRM::WinRMWebService.new(endpoint, :ssl, user: user, pass: pass, disable_sspi: true)
+  transport = :ssl
 else
   fail "Invalid authtype '#{auth}' specified, expected: kerberos, plaintext, ssl."
 end
 
-winrm.set_timeout(ENV['RD_CONFIG_WINRMTIMEOUT'].to_i) if ENV['RD_CONFIG_WINRMTIMEOUT']
+conn_opts = conn_opts.merge( { transport: transport } )
+conn_opts = conn_opts.merge( { ca_trust_path: ENV['RD_CONFIG_CA_TRUST_PATH']}) if ENV['RD_CONFIG_CA_TRUST_PATH'] && transport == :ssl
+
+conn_opts = conn_opts.merge( { operation_timeout: ENV['RD_CONFIG_WINRMTIMEOUT'].to_i } ) if ENV['RD_CONFIG_WINRMTIMEOUT']
+
+
+if ENV['RD_JOB_LOGLEVEL'] == 'DEBUG'
+  puts "Connection options :"
+  puts conn_opts.inspect
+end
+
+winrm = WinRM::Connection.new(conn_opts)
 
 case shell
 when 'powershell'
-  result = winrm.create_executor().run_powershell_script(command)
+  result = winrm.shell(:powershell).run(command)
 when 'cmd'
-  result = winrm.create_executor().run_cmd(command)
+  result = winrm.shell(:cmd).run(command)
 when 'wql'
-  result = winrm.wql(command)
+  result = winrm.run_wql(command)
 end
 
-result[:data].each do |output_line|
-  eoutput = "#{eoutput}#{output_line[:stderr]}" if output_line.key?(:stderr)
-  ooutput = "#{ooutput}#{output_line[:stdout]}" if output_line.key?(:stdout)
-end
 
-STDERR.print stderr_text(eoutput) if eoutput != ''
-STDOUT.print ooutput
-exit result[:exitcode] if result[:exitcode] != 0
+print result.output
 
-# winrm.powershell(command) do |stdout, stderr|
-#   STDOUT.print stdout
-#   STDERR.print stderr
-# end
-
-# result = winrm.cmd(command)
-# if result[:exitcode] != 0
-#    result[:data].each do |output_line|
-#          if output_line.has_key?(:stderr)
-#                  STDOUT.print output_line[:stderr]
-#                      end
-#            end
-# else
-#    result[:data].each do |output_line|
-#          if output_line.has_key?(:stdout)
-#                  STDOUT.print output_line[:stdout]
-#                      end
-#            end
-# end
+exit result.exitcode if result.exitcode != 0

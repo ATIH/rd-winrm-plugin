@@ -85,6 +85,14 @@ providers:
         scope: Instance
         renderingOptions:
           instance-scope-node-attribute: "winrmtimeout"
+      - name: ca_trust_path
+        title: Authorities Certificates File
+        description: "The path to a certificate .pem file to trust"
+        type: String
+        required: false
+        scope: Instance
+        renderingOptions:
+          instance-scope-node-attribute: "ca_trust_path"
   - name: WinRMcp
     title: WinRM File Copier
     service: FileCopier
@@ -164,4 +172,11 @@ providers:
         scope: Instance
         renderingOptions:
           instance-scope-node-attribute: "winrmtimeout"
-
+      - name: ca_trust_path
+        title: Authorities Certificates File
+        description: "The path to a certificate .pem file to trust"
+        type: String
+        required: false
+        scope: Instance
+        renderingOptions:
+          instance-scope-node-attribute: "ca_trust_path"

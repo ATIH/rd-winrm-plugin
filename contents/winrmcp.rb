@@ -63,8 +63,8 @@ conn_opts = conn_opts.merge( { operation_timeout: ENV['RD_CONFIG_WINRMTIMEOUT'].
 
 if ENV['RD_JOB_LOGLEVEL'] == 'DEBUG'
   puts "Connection options :"
-  conn_opts_pwmask = conn_opts
-  conn_opts["password"] = "***********"
+  conn_opts_pwmask = conn_opts.clone
+  conn_opts_pwmask[:password] = "***********"
   puts conn_opts_pwmask.inspect
 end
 
